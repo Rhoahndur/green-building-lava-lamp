@@ -20,8 +20,6 @@ cd green-building-lava-lamp
 python3 lava_lamp.py crisp-owl
 ```
 
-Open https://sundai.willsarg.com/crisp-owl?view=close. Replace `crisp-owl` with the instance assigned to you. GitHub sign-in alone does not create an instance; use the name from the workshop host or simulator UI.
-
 Runs continuously from your machine at up to 20 FPS; press Ctrl+C to stop. Keep the machine awake and connected. Only run one sender per instance. Any previously uploaded simulator clip resumes when live frames stop.
 
 Watch it locally, with no instance, in a truecolor terminal:
