@@ -64,7 +64,7 @@ User-Agent: green-building-lava-lamp/2
 
 ## How the blobs work
 
-The display is 9 windows wide and 17 floors tall. Each blob has position, velocity, radius, temperature, and a small hue offset around a slowly drifting base color.
+The display is 9 windows wide and 17 floors tall. Each blob has position, velocity, radius, temperature, and its own hue. Blobs spawn spread across most of the color wheel and drift at slightly different speeds.
 
 | Knob | Default | Role |
 | --- | --- | --- |
@@ -74,11 +74,11 @@ The display is 9 windows wide and 17 floors tall. Each blob has position, veloci
 | `DRAG` | 0.55 | Caps terminal speed with `MAX_SPEED` (1.8). |
 | `MERGE_FACTOR` | 0.32 | Overlapping blobs fuse and conserve area when more than `MIN_BLOBS` (5) are alive. |
 | `SPLIT_RADIUS` / `SPLIT_TEMP` | 3.15 / 0.68 | Large hot blobs can split, up to `MAX_BLOBS` (7). |
-| `HUE_SPREAD` / `HUE_DRIFT` | 0.1 / 0.004 | Analogous colors, full cycle ~4 minutes. |
+| `HUE_SPREAD` / `HUE_DRIFT` | 0.62 / 0.033 | Blobs span ~60% of the wheel; a full cycle is ~30 seconds. |
 | `BACKGROUND` | `(5, 2, 15)` | Dark fluid behind the glow. |
 | `Y_ASPECT` | 0.85 | Windows are slightly taller than they are wide. |
 | `GAUSS_FALLOFF` | 2.5 | Soft metaball edges. |
 
-`--fps` sets `dt = 1/fps`. That is deliberate: `--seed 13 --fps 20` always produces the same frames. Most seeds are warm wax; about one in four is a teal set.
+`--fps` sets `dt = 1/fps`. That is deliberate: `--seed 13 --fps 20` always produces the same frames.
 
 MIT licensed; see `LICENSE`.
