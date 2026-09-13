@@ -57,8 +57,9 @@ MERGE_FACTOR = 0.32
 SPLIT_RADIUS = 3.15
 SPLIT_TEMP = 0.68
 SPLIT_RATE = 0.35
-HUE_SPREAD = 0.1
-HUE_DRIFT = 0.004
+HUE_SPREAD = 0.62
+HUE_DRIFT = 0.033
+HUE_SPEED_JITTER = 0.024
 SAT_BASE = 0.82
 SAT_TEMP = 0.18
 VAL_BASE = 0.65
@@ -94,7 +95,8 @@ class Blob:
     vx: float
     vy: float
     radius: float
-    hue_offset: float
+    hue: float
+    hue_speed: float
     phase: float
     temp: float
 
@@ -113,6 +115,7 @@ def _mass(blob: Blob) -> float:
 
 def spawn_blobs(rng: random.Random, count: int = START_BLOBS) -> list[Blob]:
     blobs = []
+    start_hue = rng.random()
     for i in range(count):
         y = rng.uniform(Y_MIN + 0.8, Y_MAX - 0.8)
         blobs.append(
@@ -122,7 +125,8 @@ def spawn_blobs(rng: random.Random, count: int = START_BLOBS) -> list[Blob]:
                 vx=rng.uniform(-0.45, 0.45),
                 vy=rng.uniform(-0.65, 0.65),
                 radius=rng.uniform(2.0, 3.4),
-                hue_offset=(i / max(count, 1) - 0.5) * HUE_SPREAD,
+                hue=(start_hue + i / max(count, 1) * HUE_SPREAD) % 1.0,
+                hue_speed=HUE_DRIFT + rng.uniform(-HUE_SPEED_JITTER, HUE_SPEED_JITTER),
                 phase=rng.uniform(0, math.tau),
                 temp=max(0.0, min(1.0, ambient_temp(y) + rng.uniform(-0.15, 0.15))),
             )
@@ -130,9 +134,16 @@ def spawn_blobs(rng: random.Random, count: int = START_BLOBS) -> list[Blob]:
     return blobs
 
 
+def _mix_hue(h1: float, w1: float, h2: float, w2: float) -> float:
+    x = w1 * math.cos(h1 * math.tau) + w2 * math.cos(h2 * math.tau)
+    y = w1 * math.sin(h1 * math.tau) + w2 * math.sin(h2 * math.tau)
+    return (math.atan2(y, x) / math.tau) % 1.0
+
+
 def _integrate(blob: Blob, t: float, dt: float) -> None:
     blob.temp += (ambient_temp(blob.y) - blob.temp) * min(1.0, HEAT_RATE * dt)
     blob.temp = max(0.0, min(1.0, blob.temp))
+    blob.hue = (blob.hue + blob.hue_speed * dt) % 1.0
     blob.vx += math.sin(t * 0.73 + blob.phase) * WANDER * dt
     blob.vy += math.sin(t * 0.41 + blob.phase * 1.3) * WANDER_Y * dt
     blob.vy += (NEUTRAL_TEMP - blob.temp) * BUOYANCY * dt
@@ -194,7 +205,8 @@ def _try_merges(blobs: list[Blob]) -> list[Blob]:
             vx=(a.vx * m1 + b.vx * m2) / total,
             vy=(a.vy * m1 + b.vy * m2) / total,
             radius=min(MAX_RADIUS, math.sqrt(total)),
-            hue_offset=(a.hue_offset * m1 + b.hue_offset * m2) / total,
+            hue=_mix_hue(a.hue, m1, b.hue, m2),
+            hue_speed=(a.hue_speed * m1 + b.hue_speed * m2) / total,
             phase=a.phase,
             temp=(a.temp * m1 + b.temp * m2) / total,
         )
@@ -226,7 +238,8 @@ def _try_splits(blobs: list[Blob], rng: random.Random, dt: float) -> list[Blob]:
                     vx=blob.vx + sign * math.cos(angle) * 0.3,
                     vy=blob.vy + sign * math.sin(angle) * 0.3,
                     radius=radius,
-                    hue_offset=blob.hue_offset + sign * rng.uniform(0.01, 0.04),
+                    hue=(blob.hue + sign * rng.uniform(0.06, 0.14)) % 1.0,
+                    hue_speed=blob.hue_speed + sign * rng.uniform(0.002, 0.01),
                     phase=blob.phase + sign * 0.7,
                     temp=blob.temp,
                 )
@@ -254,10 +267,10 @@ def pixel_index(x: int, y: int) -> int:
     return (y * WIDTH + x) * CHANNELS
 
 
-def render_frame(blobs: list[Blob], base_hue: float) -> bytes:
+def render_frame(blobs: list[Blob]) -> bytes:
     colors = [
         colorsys.hsv_to_rgb(
-            (base_hue + blob.hue_offset) % 1.0,
+            blob.hue % 1.0,
             max(0.0, min(1.0, SAT_BASE - SAT_TEMP * blob.temp)),
             max(0.0, min(1.0, VAL_BASE + VAL_TEMP * blob.temp)),
         )
@@ -286,18 +299,12 @@ def frames(fps: int = 20, seed: int | None = None) -> Iterator[bytes]:
     """Yield RGB frames of heat-driven blobs that merge, split, and blend."""
     rng = random.Random(seed)
     blobs = spawn_blobs(rng)
-    # Analogous colors: usually warm wax, sometimes a teal "Green Building" set.
-    if rng.random() < 0.75:
-        base_hue = rng.uniform(-0.06, 0.09) % 1.0
-    else:
-        base_hue = rng.uniform(0.42, 0.58)
     dt = 1 / fps
     t = 0.0
     while True:
         blobs = step_blobs(blobs, rng, t, dt)
-        yield render_frame(blobs, base_hue)
+        yield render_frame(blobs)
         t += dt
-        base_hue = (base_hue + HUE_DRIFT * dt) % 1.0
 
 
 def ansi_preview(pixels: bytes) -> str:
