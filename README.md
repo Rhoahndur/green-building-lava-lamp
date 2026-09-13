@@ -28,6 +28,17 @@ Watch it locally, with no instance, in a truecolor terminal:
 python3 lava_lamp.py --preview --frames 0
 ```
 
+Drive the same lamp from a PIM545 (Pico Scroll Pack) on an ESP32. The pack shows the 7×17 lava locally; this client listens over USB serial and drops the matching pebble on the 9×17 building:
+
+```sh
+python3 -m pip install pyserial
+python3 lava_lamp.py crisp-owl --controller
+```
+
+Tap buttons A / B / X / Y on the pack. Opposite corners on the building are the same corners as on the pack (B top-left, A top-right, Y bottom-left, X bottom-right). Keep this process running while you play.
+
+Pass `--controller /dev/cu.usbserial-0001` if auto-detect picks the wrong port.
+
 ## Options
 
 | Option | Meaning |
@@ -40,6 +51,7 @@ python3 lava_lamp.py --preview --frames 0
 | `--preview` | Draw each frame as an ANSI color grid on stderr. |
 | `--dump-ppm DIR` | Write `frame-0001.ppm`, `frame-0002.ppm`, … into `DIR`. |
 | `--dump-png PATH` | Write a 24× nearest-neighbor PNG of the last generated frame. |
+| `--controller` | Read pebble taps from a PIM545 ESP32 on USB serial (auto-detect, or pass a port). |
 
 `--preview`, `--dry-run`, and `--dump-*` do not need an instance.
 

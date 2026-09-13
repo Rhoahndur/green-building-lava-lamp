@@ -85,6 +85,10 @@ lowers displayed FPS but does not change seeded motion.
 
 --dry-run with no --frames validates 600 frames. --preview and --dump-*
 do not require an instance.
+
+PIM545 controller:
+  python3 lava_lamp.py crisp-owl --controller
+  Tap A/B/X/Y on the pack; the same pebble is dropped on this 9x17 facade.
 """
 
 
@@ -295,16 +299,124 @@ def render_frame(blobs: list[Blob]) -> bytes:
     return bytes(pixels)
 
 
+# PIM545 corner buttons mapped onto this 9x17 facade (A/B roof, X/Y ground).
+CORNERS = {
+    "B": (0.3, 0.3),
+    "A": (WIDTH - 1.2, 0.3),
+    "Y": (0.3, HEIGHT - 1.2),
+    "X": (WIDTH - 1.2, HEIGHT - 1.2),
+}
+
+WAVE_C = 10.0
+WAVE_LAMBDA = 5.4
+WAVE_K = math.tau / WAVE_LAMBDA
+WAVE_SIGMA = 1.40
+WAVE_GAMMA = 0.32
+WAVE_R0 = 1.35
+WAVE_MAX_AGE = 2.4
+WAVE_MAX_DROPS = 4
+
+
+def _circular_wave(r: float, t: float, amp: float) -> float:
+    if t < 0 or amp == 0:
+        return 0.0
+    psi = r - WAVE_C * t
+    env = math.exp(-(psi * psi) / (2.0 * WAVE_SIGMA * WAVE_SIGMA))
+    spread = 1.0 / math.sqrt(0.35 * r + WAVE_R0)
+    tdamp = math.exp(-WAVE_GAMMA * t)
+    return amp * tdamp * spread * env * math.cos(WAVE_K * psi)
+
+
+def _impulse(blobs: list[Blob], x: float, y: float, strength: float = 2.2) -> None:
+    for blob in blobs:
+        dx = blob.x - x
+        dy = blob.y - y
+        dist = math.hypot(dx, dy) + 0.18
+        mag = min(3.2, strength / (dist * dist))
+        blob.vx += (dx / dist) * mag
+        blob.vy += (dy / dist) * mag
+        blob.temp = max(0.0, min(1.0, blob.temp + 0.08 * mag))
+
+
+class Ripples:
+    def __init__(self) -> None:
+        self.drops: list[tuple[float, float, float, float]] = []  # x, y, t, amp
+
+    def drop(self, x: float, y: float, amp: float = 1.0) -> None:
+        if len(self.drops) >= WAVE_MAX_DROPS:
+            self.drops.pop(0)
+        self.drops.append((x, y, 0.0, amp))
+
+    def step(self, dt: float, blobs: list[Blob]) -> None:
+        nxt = []
+        for x, y, t, amp in self.drops:
+            t += dt
+            if t > WAVE_MAX_AGE:
+                continue
+            nxt.append((x, y, t, amp))
+            for blob in blobs:
+                dx = blob.x - x
+                dy = blob.y - y
+                r = math.hypot(dx, dy)
+                if r < 0.08:
+                    continue
+                mag = _circular_wave(r, t, amp) * dt * 16.0
+                blob.vx += (dx / r) * mag
+                blob.vy += (dy / r) * mag
+        self.drops = nxt
+
+    def height(self, px: float, py: float) -> float:
+        h = 0.0
+        for x, y, t, amp in self.drops:
+            h += _circular_wave(math.hypot(px - x, py - y), t, amp)
+        return h
+
+    def apply(self, pixels: bytes) -> bytes:
+        if not self.drops:
+            return pixels
+        out = bytearray(pixels)
+        for y in range(HEIGHT):
+            for x in range(WIDTH):
+                h = max(-1.6, min(1.6, self.height(x, y)))
+                if h == 0:
+                    continue
+                add = round(h * 230)
+                i = pixel_index(x, y)
+                for c in range(CHANNELS):
+                    out[i + c] = max(0, min(255, out[i + c] + add))
+        return bytes(out)
+
+
+class Simulation:
+    def __init__(self, fps: int = 20, seed: int | None = None) -> None:
+        self.rng = random.Random(seed)
+        self.blobs = spawn_blobs(self.rng)
+        self.ripples = Ripples()
+        self.dt = 1 / fps
+        self.t = 0.0
+
+    def drop_corner(self, name: str) -> bool:
+        key = name.strip().upper()[:1]
+        if key not in CORNERS:
+            return False
+        x, y = CORNERS[key]
+        self.ripples.drop(x, y)
+        _impulse(self.blobs, x, y)
+        return True
+
+    def step(self) -> bytes:
+        self.blobs = step_blobs(self.blobs, self.rng, self.t, self.dt)
+        self.ripples.step(self.dt, self.blobs)
+        pixels = self.ripples.apply(render_frame(self.blobs))
+        self.t += self.dt
+        return pixels
+
+
 def frames(fps: int = 20, seed: int | None = None) -> Iterator[bytes]:
     """Yield RGB frames of heat-driven blobs that merge, split, and blend."""
-    rng = random.Random(seed)
-    blobs = spawn_blobs(rng)
-    dt = 1 / fps
-    t = 0.0
+    sim = Simulation(fps, seed)
     while True:
-        blobs = step_blobs(blobs, rng, t, dt)
-        yield render_frame(blobs)
-        t += dt
+        yield sim.step()
 
 
 def ansi_preview(pixels: bytes) -> str:
@@ -448,6 +560,20 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help=f"Write a {PNG_SCALE}x nearest-neighbor PNG of the last generated frame",
     )
+    parser.add_argument(
+        "--controller",
+        nargs="?",
+        const="auto",
+        metavar="PORT",
+        help="Read pebble taps from a PIM545 ESP32 (USB serial). "
+        "Pass a device such as /dev/cu.usbserial-0001, or omit the path to auto-detect",
+    )
+    parser.add_argument(
+        "--baud",
+        type=int,
+        default=115200,
+        help="Controller serial baud (default: 115200)",
+    )
     return parser
 
 
@@ -457,6 +583,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.frames is not None and args.frames < 0:
         parser.error("--frames must be nonnegative")
     local_only = bool(args.dry_run or args.preview or args.dump_ppm or args.dump_png)
+    if args.controller and not args.instance and not local_only:
+        parser.error("instance is required with --controller unless using --preview or --dry-run")
     if not args.instance and not local_only:
         parser.error("instance is required unless using --dry-run, --preview, or --dump-*")
     if args.instance and any(c not in INSTANCE_CHARS for c in args.instance):
@@ -468,6 +596,57 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args._streaming = bool(args.instance) and not args.dry_run
     args._limit = frame_limit(args.frames, args.dry_run or not args._streaming)
     return args
+
+
+def open_controller(port: str, baud: int):
+    try:
+        import serial  # type: ignore
+        from serial.tools import list_ports  # type: ignore
+    except ImportError as error:
+        raise SystemExit("pip install pyserial  (needed for --controller)") from error
+
+    if port == "auto":
+        ports = list(list_ports.comports())
+        candidates = [
+            p.device
+            for p in ports
+            if any(
+                token in (p.device + " " + (p.description or "")).lower()
+                for token in ("usb", "wch", "cp210", "ch340", "uart", "serial", "esp")
+            )
+        ]
+        if not candidates:
+            names = ", ".join(p.device for p in ports) or "(none)"
+            raise SystemExit(f"No USB serial device found. Ports: {names}")
+        port = candidates[0]
+        print(f"Controller on {port}", flush=True)
+    ser = serial.Serial()
+    ser.port = port
+    ser.baudrate = baud
+    ser.timeout = 0
+    ser.dtr = False
+    ser.rts = False
+    ser.open()
+    time.sleep(0.3)
+    ser.reset_input_buffer()
+    return ser
+
+
+def poll_pebbles(ser, buf: bytearray) -> list[str]:
+    """Pull PEBBLE A/B/X/Y events from the ESP32 serial log."""
+    chunk = ser.read(256) if ser is not None else b""
+    if chunk:
+        buf.extend(chunk)
+    events: list[str] = []
+    while True:
+        nl = buf.find(b"\n")
+        if nl < 0:
+            break
+        line = bytes(buf[:nl]).decode("ascii", errors="replace").strip()
+        del buf[: nl + 1]
+        if line.startswith("PEBBLE ") and len(line) > 7:
+            events.append(line[7].upper())
+    return events
 
 
 def _send_frame(conn: http.client.HTTPConnection, path: str, pixels: bytes) -> None:
@@ -512,9 +691,20 @@ def main(argv: list[str] | None = None) -> None:
     started_run = time.monotonic()
     last_report = started_run
     cursor_hidden = False
+    sim = Simulation(args.fps, args.seed)
+    controller = None
+    serial_buf = bytearray()
     try:
-        for pixels in frames(args.fps, args.seed):
+        if args.controller:
+            controller = open_controller(args.controller, args.baud)
+            print("Listening for PIM545 corner taps (PEBBLE A/B/X/Y)", flush=True)
+        while True:
             loop_started = time.monotonic()
+            if controller is not None:
+                for name in poll_pebbles(controller, serial_buf):
+                    if sim.drop_corner(name):
+                        print(f"pebble {name.upper()} -> building", flush=True)
+            pixels = sim.step()
             if len(pixels) != FRAME_BYTES:
                 raise RuntimeError(f"expected {FRAME_BYTES}-byte frames, got {len(pixels)}")
             generated += 1
@@ -570,6 +760,8 @@ def main(argv: list[str] | None = None) -> None:
             sys.stderr.flush()
         if conn:
             conn.close()
+        if controller is not None:
+            controller.close()
         if args.dump_png and last_pixels is not None:
             out_w, out_h, rgb = upscale_rgb(last_pixels, WIDTH, HEIGHT, PNG_SCALE)
             write_png(args.dump_png, out_w, out_h, rgb)
