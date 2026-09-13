@@ -1,17 +1,13 @@
-# Green Building Lava Lamp
+# Archived
 
-This project now lives in **[esp32-pim545-lava-lamp](https://github.com/Rhoahndur/esp32-pim545-lava-lamp)**.
+This repository is **archived**. All work continues in:
 
-That repo has:
+**https://github.com/Rhoahndur/esp32-pim545-lava-lamp**
 
-- the 9×17 RGB simulator client (`building.py`)
-- the ESP32 firmware for a PIM545 7×17 pack
-- corner-button pebbles that drive **both** displays
+That repo includes the 9×17 Green Building simulator client (`building.py`), the ESP32 firmware for a PIM545 7×17 pack, and the pebble-wave bridge between them.
 
 ```sh
 git clone https://github.com/Rhoahndur/esp32-pim545-lava-lamp.git
 cd esp32-pim545-lava-lamp
 python3 building.py crisp-owl --controller
 ```
-
-This repository is kept so old clone URLs still resolve. Use the combined repo for anything new.
